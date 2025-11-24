@@ -79,7 +79,7 @@ Connect to Databento by calling `dbn_connect()`, specifying your API key and the
 
 ```
 dbn_t dbn;
-if (dbn_init_and_connect(
+if (dbn_connect(
   &dbn,
   "my api key here",
   "OPRA.PILLAR",
@@ -110,7 +110,7 @@ if(dbn_start(
 }
 ```
 
-Once subscribed, Databento will begin sending data, which will buffer within the `dbn_t` object's buffers. (This client uses the `liburing` and the kernel's `io_uring` mechanism to receive data into a pair of user space buffers asynchronously.) To process this data, you must call `dbn_get()`. Generally you will want to dedicate a thread to repeatedly calling `dbn_get()` to process messages as fast as possible. Each call will block until at least one message is received and processed. Under high load, many messages may be processed by a single call to `dbn_get()`. Messages result in the assigned handler functions being called. `dbn_get()` itself returns the number of messages that were processed by that call.
+Once subscribed, Databento will begin sending data, which will buffer within the `dbn_t` object's buffers. (This client uses `liburing` and the kernel's `io_uring` mechanism to receive data into a pair of user space buffers asynchronously.) To process this data, you must call `dbn_get()`. Generally you will want to dedicate a thread to repeatedly calling `dbn_get()` to process messages as fast as possible. Each call will block until at least one message is received and processed. Under high load, many messages may be processed by a single call to `dbn_get()`. Messages result in the assigned handler functions being called. `dbn_get()` itself returns the number of messages that were processed by that call.
 
 ```
 while(1)
@@ -120,7 +120,7 @@ while(1)
 }
 ```
 
-`dbn_connect()`, `dbn_start()`, and `dbn_get()` all take an arbitrary pointer argument named `arg`. This argument is not used by the client, but is passed along to any handler functions that are invoked.
+`dbn_connect()`, `dbn_start()`, and `dbn_get()` all take an arbitrary pointer argument named `arg`. This argument is not used by the client, but is passed along to any handler functions that are invoked. `arg` can be set to NULL if not needed.
 
 Finally, to close the connection and free memory within the client object, call `dbn_close()`. The `dbn_t` client object is unitialized after this call.
 
