@@ -517,6 +517,7 @@ int main(int argc, char **argv)
   printf("  cmpb1: %s\n", pprate(num_cmbp1, ts_run_end - ts_smap_last));
   printf("  bbo:   %s\n", pprate(num_bbo, ts_run_end - ts_smap_last));
 
+  double ts_event_recv = 0;
   double ts_event_out = 0;
   double ts_recv_out = 0;
   double ts_out_local = 0;
@@ -524,12 +525,14 @@ int main(int argc, char **argv)
   double ts_recv_local = 0;
   for (size_t i = 0; i < tss_count; i++)
   {
+    ts_event_recv += tss_recv[i] - tss_event[i];
     ts_event_out += tss_out[i] - tss_event[i];
     ts_recv_out += tss_out[i] - tss_recv[i];
     ts_out_local += tss_local[i] - tss_out[i];
     ts_event_local += tss_local[i] - tss_event[i];
     ts_recv_local += tss_local[i] - tss_recv[i];
   }
+  ts_event_recv /= tss_count;
   ts_event_out /= tss_count;
   ts_recv_out /= tss_count;
   ts_out_local /= tss_count;
@@ -538,13 +541,16 @@ int main(int argc, char **argv)
 
 
   printf("Latencies:\n");
+
   if (replay)
   {
+    printf("  ts_event -> ts_recv:  n/a (intra-day replay)\n");
     printf("  ts_event -> ts_out:   n/a (intra-day replay)\n");
     printf("  ts_recv  -> ts_out:   n/a (intra-day replay)\n");
   }
   else
   {
+    printf("  ts_event -> ts_recv:  %s\n", pptime((uint64_t)ts_event_recv));
     printf("  ts_event -> ts_out:   %s\n", pptime((uint64_t)ts_event_out));
     printf("  ts_recv  -> ts_out:   %s\n", pptime((uint64_t)ts_recv_out));
   }

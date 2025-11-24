@@ -21,6 +21,7 @@ dbn_roots -k <key> [-h] [-o <path>]
 
 
 - `-k <key>`: Databento API key (required)
+- `-c`: Dump as a C header instead of a simple list
 - `-o <path>`: Dump roots to file instead of standard output
 - `-h`: Show usage information and exit
 

@@ -48,6 +48,7 @@ Message rates:
   cmpb1: 28.134 thousand messages per second
   bbo:   0.000 messages per second
 Latencies:
+  ts_event -> ts_recv:  201.014 us
   ts_event -> ts_out:   2.023 ms
   ts_recv  -> ts_out:   1.822 ms
   ts_out   -> ts_local: 3.447 ms
@@ -80,6 +81,7 @@ Message rates:
   cmpb1: 0.000 messages per second
   bbo:   177.303 thousand messages per second
 Latencies:
+  ts_event -> ts_recv:  n/a (intra-day replay)
   ts_event -> ts_out:   n/a (intra-day replay)
   ts_recv  -> ts_out:   n/a (intra-day replay)
   ts_out   -> ts_local: 3.901 ms
@@ -92,6 +94,7 @@ Latencies:
 Message rates are calculated over the respective window. For example, symbol mapping messages are only received during the symbol mapping phase of a connection, so the symbol mapping rate measures how many smap messages were received per second during that phase, not over the whole session.
 
 Interpretation of latencies depends on the dataset:
+- `ts_event -> ts_recv`: For CMBP-1 this measures the duration from when a quote or trade occurred (as timestamped by the venue) to when the quote/trade was received by Databento (as timestamped by the Databento feed handler). For interval-based BBO this measures the duration from when the quote/trade occurred to the end of the interval.
 - `ts_event -> ts_out`: Measures the duration from when a quote or trade occurred (as timestamped by the venue) to when the quote/trade was dispatched to the user (as timestamped by the Databento gateway). For CMBP-1 this is a measure of internal latency in Databento's feed handler and gateway, combined. For interval-based BBO this is not very useful, since the latest quote for any given symbol could be quite a long time ago.
 - `ts_recv -> ts_out`: For CMBP-1 this measures the duration from when a quote/trade was received by Databento (as timestamped by the Databento feed handler) to when the quote/trade was dispatched to the user (as timestamped by the Databento gateway), and is a measure of internal latency in Databento's feed handler and gateway, combined. For interval-based BBO this measures the duration from the end of the interval to when the quote was dispatched to the user, and is a measure of internal latency in Databento's gateway.
 - `ts_out -> ts_local`: Measures the duration from when a quote or trade was dispatched to the user (as timestamped by Databento's gateway) and when it was received by the client (as timestamped locally). This is a measure of path latency between Databento and the user.
