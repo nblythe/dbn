@@ -1,4 +1,4 @@
-add_library(dbn STATIC dbn.c)
+add_library(dbn STATIC dbn.c dbn_multi.c dbn_opra_discover.c osi.c)
 
 
 # Use PkgConfig to find libsodium and liburing.

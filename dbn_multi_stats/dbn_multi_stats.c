@@ -1,6 +1,6 @@
 /**
- * @file dbn_stats.c
- * @brief Subscribe to command-line specified data and collect statistics
+ * @file dbn_multi_stats.c
+ * @brief Subscribe to command-line specified data and collect statistics, using multiple parallel sessions
  * @author Nathan Blythe
  * @copyright Copyright 2025 Nathan Blythe
  * @copyright Released under the Apache-2.0 license, see LICENSE
@@ -13,13 +13,17 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdatomic.h>
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
 #include <signal.h>
 
+#include <pthread.h>
+
 #include <dbn.h>
+#include <dbn_multi.h>
 
 
 /**
@@ -31,27 +35,29 @@
  */
 static void usage(int exit_code)
 {
-  printf("Usage: dbn_stats -k <key> -d <dataset> -c <schema> -b <symbology> [-s <symbol>] [-f <path>] [-r] [-h]\n");
+  printf("Usage: dbn_multi_stats -k <key> -d <dataset> -c <schema> -b <symbology> [-s <i>:<symbol>] [-f <path>] [-t <threads>] [-r] [-h]\n");
   printf("\n");
   printf("Options:\n");
-  printf("   -k <key>       Databento API key\n");
-  printf("   -d <dataset>   Dataset name\n");
-  printf("   -c <schema>    Schema name\n");
-  printf("   -b <symbology> Symbology\n");
-  printf("   -s <symbol>    Symbol (may provide multiple)\n");
-  printf("   -f <path>      Path to file of symbols, one per line (may provide multiple)\n");
-  printf("   -r             Intra-day replay\n");
-  printf("   -h             Show this usage information and exit\n");
+  printf("   -k <key>         Databento API key\n");
+  printf("   -d <dataset>     Dataset name\n");
+  printf("   -c <schema>      Schema name\n");
+  printf("   -b <symbology>   Symbology\n");
+  printf("   -s <i>:<symbol>  Session index and symbol (may provide multiple)\n");
+  printf("   -f <i>:<path>    Session index and path to file of symbols, one per line (may provide multiple)\n");
+  printf("   -t <threads>     Set number of handler threads\n");
+  printf("                    Defaults to CPU count minus number of sesssions\n");
+  printf("   -r               Intra-day replay\n");
+  printf("   -h               Show this usage information and exit\n");
   printf("\n");
-  printf("Example: dbn_stats -k <key> -d OPRA.PILLAR -c cbbo-1s -b parent -s MSFT.OPT -s AAPL.OPT\n");
+  printf("Example: dbn_multi_stats -k <key> -d OPRA.PILLAR -c cbbo-1s -b parent -s 0:MSFT.OPT -s 1:AAPL.OPT\n");
   exit(exit_code);
 }
 
 
 /**
- * @brief Databento live data client.
+ * @brief Databento multi-threaded, multi-session live data client.
  */
-static dbn_t dbn;
+static dbn_multi_t dbn_multi;
 
 
 /**
@@ -63,20 +69,21 @@ static volatile bool siginted = false;
 /*
  * Statistics collected while running.
  */
-static volatile uint64_t num_emsg = 0;
-static volatile uint64_t num_smsg = 0;
-static volatile uint64_t ts_smap_first = 0;
-static volatile uint64_t ts_smap_last = 0;
-static volatile uint64_t num_smap = 0;
-static volatile uint64_t num_sdef = 0;
-static volatile uint64_t num_cmbp1 = 0;
-static volatile uint64_t num_bbo = 0;
+static atomic_uint_fast64_t num_emsg = 0;
+static atomic_uint_fast64_t num_smsg = 0;
+static atomic_uint_fast64_t ts_smap_first = 0;
+static atomic_uint_fast64_t ts_smap_last = 0;
+static atomic_uint_fast64_t num_smap = 0;
+static atomic_uint_fast64_t num_sdef = 0;
+static atomic_uint_fast64_t num_cmbp1 = 0;
+static atomic_uint_fast64_t num_bbo = 0;
 static uint64_t *tss_event = NULL;
 static uint64_t *tss_recv = NULL;
 static uint64_t *tss_out = NULL;
 static uint64_t *tss_local = NULL;
-static volatile uint64_t tss_capacity = 0;
-static volatile uint64_t tss_count = 0;
+static uint64_t tss_capacity = 0;
+static atomic_uint_fast64_t tss_count = 0;
+static pthread_rwlock_t rwlock = PTHREAD_RWLOCK_INITIALIZER;
 
 
 /**
@@ -93,8 +100,12 @@ static inline void record_timestamps(
   uint64_t ts_out,
   uint64_t ts_local)
 {
-  if (tss_count == tss_capacity)
+  uint64_t offset = atomic_fetch_add(&tss_count, 1);
+
+  if (offset >= tss_capacity)
   {
+    pthread_rwlock_wrlock(&rwlock);
+
     tss_capacity = tss_capacity ? 2 * tss_capacity : 1048576;
 
     tss_event = realloc(tss_event, tss_capacity * sizeof(uint64_t));
@@ -124,13 +135,16 @@ static inline void record_timestamps(
       perror("realloc");
       abort();
     }
+
+    pthread_rwlock_unlock(&rwlock);
   }
 
-  tss_event[tss_count] = ts_event;
-  tss_recv[tss_count] = ts_recv;
-  tss_out[tss_count] = ts_out;
-  tss_local[tss_count] = ts_local;
-  tss_count++;
+  pthread_rwlock_rdlock(&rwlock);
+  tss_event[offset] = ts_event;
+  tss_recv[offset] = ts_recv;
+  tss_out[offset] = ts_out;
+  tss_local[offset] = ts_local;
+  pthread_rwlock_unlock(&rwlock);
 }
 
 
@@ -146,7 +160,7 @@ static void on_sigint(int signum)
 
   if (num_sigints == 2)
   {
-    dbn_close(&dbn);
+    dbn_multi_close_all(&dbn_multi);
   }
   else if (num_sigints > 2)
     abort();
@@ -234,22 +248,22 @@ static const char *pprate(uint64_t count, uint64_t ns)
 /**
  * @brief Handle client errors and warnings by printing to stdout.
  */
-static void on_error(dbn_t *dbn, bool fatal, char *msg)
+static void on_error(dbn_multi_t *dbn_multi, bool fatal, char *msg)
 {
   if (fatal)
   {
-    fprintf(stderr, "Client error: %s\n", msg);
+    printf("Client error: %s\n", msg);
     exit(EXIT_FAILURE);
   }
   else
-    fprintf(stderr, "Client warning: %s\n", msg);
+    printf("Client warning: %s\n", msg);
 }
 
 
 /**
  * @brief Databento message handler.
  */
-static void on_msg(dbn_t *dbn, dbn_hdr_t *msg)
+static void on_msg(dbn_multi_t *dbn, dbn_hdr_t *msg)
 {
   /*
    * Count CMBP-1 messages and record timestamps for calculating latencies.
@@ -257,7 +271,7 @@ static void on_msg(dbn_t *dbn, dbn_hdr_t *msg)
   if (msg->rtype == DBN_RTYPE_CMBP1)
   {
     dbn_cmbp1_t *cmbp1 = (void *)msg;
-    num_cmbp1++;
+    atomic_fetch_add(&num_cmbp1, 1);
     record_timestamps(msg->ts_event, cmbp1->ts_recv, cmbp1->ts_out, nanotime());
   }
 
@@ -272,7 +286,7 @@ static void on_msg(dbn_t *dbn, dbn_hdr_t *msg)
     || msg->rtype == DBN_RTYPE_CBBO1M)
   {
     dbn_bbo_t *bbo = (void *)msg;
-    num_bbo++;
+    atomic_fetch_add(&num_bbo, 1);
     record_timestamps(bbo->hdr.ts_event, bbo->ts_recv, bbo->ts_out, nanotime());
   }
 
@@ -282,9 +296,11 @@ static void on_msg(dbn_t *dbn, dbn_hdr_t *msg)
    */
   else if (msg->rtype == DBN_RTYPE_SMAP)
   {
-    num_smap++;
-    if (!ts_smap_first) ts_smap_first = nanotime();
-    else ts_smap_last = nanotime();
+    atomic_fetch_add(&num_smap, 1);
+    uint64_t now = nanotime();
+    const uint64_t z = 0;
+    atomic_compare_exchange_strong(&ts_smap_first, &z, now);
+    atomic_store(&ts_smap_last, now);
   }
 
 
@@ -293,7 +309,7 @@ static void on_msg(dbn_t *dbn, dbn_hdr_t *msg)
    */
   else if (msg->rtype == DBN_RTYPE_SDEF)
   {
-    num_sdef++;
+    atomic_fetch_add(&num_sdef, 1);
   }
 
 
@@ -302,7 +318,7 @@ static void on_msg(dbn_t *dbn, dbn_hdr_t *msg)
    */
   else if (msg->rtype == DBN_RTYPE_SMSG)
   {
-    num_smsg++;
+    atomic_fetch_add(&num_smsg, 1);
   }
 
 
@@ -312,9 +328,46 @@ static void on_msg(dbn_t *dbn, dbn_hdr_t *msg)
   else if (msg->rtype == DBN_RTYPE_EMSG)
   {
     dbn_emsg_t *emsg = (void *)msg;
-    fprintf(stderr, "Server error: %s\n", emsg->msg);
-    num_emsg++;
+    printf("Server error: %s\n", emsg->msg);
+    atomic_fetch_add(&num_emsg, 1);
   }
+}
+
+
+static void add_symbol(
+  char ****symbols, // Absolutely sicko
+  int **num_symbols,
+  int *num_sessions,
+  int session,
+  char *symbol)
+{
+  if (session >= *num_sessions)
+  {
+    *num_symbols = realloc(*num_symbols, (session + 1) * sizeof(int));
+    *symbols = realloc(*symbols, (session + 1) * sizeof(char **));
+    if (!*num_symbols || !*symbols)
+    {
+      perror("realloc");
+      abort();
+    }
+
+    for (int j = *num_sessions; j <= session; j++)
+    {
+      (*num_symbols)[j] = 0;
+      (*symbols)[j] = NULL;
+    }
+
+    *num_sessions = session + 1;
+  }
+
+  (*num_symbols)[session]++;
+  (*symbols)[session] = realloc((*symbols)[session], (*num_symbols)[session] * sizeof(char*));
+  if (!(*symbols)[session])
+  {
+    perror("realloc");
+    abort();
+  }
+  (*symbols)[session][(*num_symbols)[session] - 1] = symbol;
 }
 
 
@@ -327,10 +380,15 @@ int main(int argc, char **argv)
   char *dataset = NULL;
   char *schema = NULL;
   char *symbology = NULL;
-  char **symbols = NULL;
-  int num_symbols = 0;
+  char ***symbols = NULL;
+  int *num_symbols = NULL;
+  int total_num_symbols = 0;
+  int num_sessions = 0;
   bool replay = false;
   char c;
+  char *d;
+  char *endptr;
+  int sid;
   while ((c = getopt(argc, argv, "hk:d:c:b:s:f:r")) != -1)
   {
     switch(c)
@@ -350,20 +408,27 @@ int main(int argc, char **argv)
         symbology = optarg;
         break;
       case 's':
-        num_symbols++;
-        symbols = realloc(symbols, num_symbols * sizeof(char *));
-        if (!symbols)
-        {
-          perror("realloc");
-          abort();
-        }
-        symbols[num_symbols - 1] = optarg;
+        d = strchr(optarg, ':');
+        if (!d) usage(EXIT_FAILURE);
+        sid = (int)strtol(optarg, &endptr, 10);
+        if (endptr != d) usage(EXIT_FAILURE);
+
+        char *s = d + 1;
+        add_symbol(&symbols, &num_symbols, &num_sessions, sid, s);
+        total_num_symbols++;
         break;
       case 'f':
-        int fd = open(optarg, O_RDONLY);
+        d = strchr(optarg, ':');
+        if (!d) usage(EXIT_FAILURE);
+        sid = (int)strtol(optarg, &endptr, 10);
+        if (endptr != d) usage(EXIT_FAILURE);
+
+        char *path = d + 1;
+
+        int fd = open(path, O_RDONLY);
         if (fd < 0)
         {
-          fprintf(stderr, "Failed to open %s : %s\n", optarg, strerror(errno));
+          fprintf(stderr, "Failed to open %s : %s\n", path, strerror(errno));
           exit(EXIT_FAILURE);
         }
 
@@ -390,14 +455,8 @@ int main(int argc, char **argv)
           }
           if (symbol[0])
           {
-            num_symbols++;
-            symbols = realloc(symbols, num_symbols * sizeof(char *));
-            if (!symbols)
-            {
-              perror("realloc");
-              abort();
-            }
-            symbols[num_symbols - 1] = symbol;
+            add_symbol(&symbols, &num_symbols, &num_sessions, sid, symbol);
+            total_num_symbols++;
           }
 
           if (eof) break;
@@ -414,7 +473,7 @@ int main(int argc, char **argv)
     }
   }
 
-  if (!api_key || !dataset || !schema || !symbology || !num_symbols)
+  if (!api_key || !dataset || !schema || !symbology || !num_sessions)
     usage(EXIT_FAILURE);
 
 
@@ -427,44 +486,55 @@ int main(int argc, char **argv)
   /*
    * Create a client and connect.
    */
-  dbn_t dbn;
-  dbn_init(&dbn, on_error, on_msg, NULL);
+  dbn_multi_t dbn_multi;
+  dbn_multi_init(&dbn_multi, on_error, on_msg, NULL);
 
   printf("Connecting to Databento... ");
   fflush(stdout);
 
   uint64_t ts_connect_start = nanotime();
 
-  if (dbn_connect(
-    &dbn,
-    api_key,
-    dataset,
-    true)) exit(EXIT_FAILURE);
+  for (int i = 0; i < num_sessions; i++)
+  {
+    if (dbn_multi_connect_and_start(
+      &dbn_multi,
+      api_key,
+      dataset,
+      true,
+      schema,
+      symbology,
+      num_symbols[i],
+      (const char * const *)symbols[i],
+      "",
+      replay)) exit(EXIT_FAILURE);
+  }
 
   uint64_t ts_connect_end = nanotime();
   printf("OK\n");
 
 
   /*
-   * Subscribe.
+   * Wait for subscriptions.
    */
   printf("Subscribing to %d symbol%s from dataset %s, schema %s... ",
-    num_symbols,
-    num_symbols == 1 ? "" : "s",
+    total_num_symbols,
+    total_num_symbols == 1 ? "" : "s",
     dataset,
     schema);
   fflush(stdout);
 
   uint64_t ts_subscribe_start = nanotime();
 
-  if (dbn_start(
-    &dbn,
-    schema,
-    symbology,
-    num_symbols,
-    (const char * const*)symbols,
-    "",
-    replay)) exit(EXIT_FAILURE);
+  while (!dbn_multi_is_fully_subscribed(&dbn_multi) && !siginted)
+  {
+    usleep(100000);
+  }
+
+  if (siginted)
+  {
+    dbn_multi_close_all(&dbn_multi);
+    exit(EXIT_SUCCESS);
+  }
 
   uint64_t ts_subscribe_end = nanotime();
   printf("OK\n");
@@ -478,7 +548,7 @@ int main(int argc, char **argv)
 
   while (!siginted)
   {
-    dbn_get(&dbn);
+    usleep(100000);
   }
 
   uint64_t ts_run_end = nanotime();
@@ -488,7 +558,7 @@ int main(int argc, char **argv)
   /*
    * Disconnect and free.
    */
-  dbn_close(&dbn);
+  dbn_multi_close_all(&dbn_multi);
 
 
   /*

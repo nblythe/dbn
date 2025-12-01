@@ -16,6 +16,35 @@
 
 
 /**
+ * @brief DBN message types.
+ */
+typedef enum
+{
+  DBN_RTYPE_MBP0      = 0x00,
+  DBN_RTYPE_MBP1      = 0x01,
+  DBN_RTYPE_MBP10     = 0x0A,
+  DBN_RTYPE_STATUS    = 0x12,
+  DBN_RTYPE_SDEF      = 0x13,
+  DBN_RTYPE_IMBALANCE = 0x14,
+  DBN_RTYPE_EMSG      = 0x15,
+  DBN_RTYPE_SMAP      = 0x16,
+  DBN_RTYPE_SMSG      = 0x17,
+  DBN_RTYPE_STAT      = 0x18,
+  DBN_RTYPE_OHLCV1S   = 0x20,
+  DBN_RTYPE_OHLCV1M   = 0x21,
+  DBN_RTYPE_OHLCV1H   = 0x22,
+  DBN_RTYPE_OHLCV1D   = 0x23,
+  DBN_RTYPE_MBO       = 0xA0,
+  DBN_RTYPE_CMBP1     = 0xB1,
+  DBN_RTYPE_CBBO1S    = 0xC0,
+  DBN_RTYPE_CBBO1M    = 0xC1,
+  DBN_RTYPE_TCBBO     = 0xC2,
+  DBN_RTYPE_BBO1S     = 0xC3,
+  DBN_RTYPE_BBO1M     = 0xC4
+} dbn_rtype_t;
+
+
+/**
  * @brief DBN message header.
  */
 typedef struct __attribute__((packed))
@@ -173,7 +202,7 @@ typedef struct __attribute__((packed))
 /**
  * @brief DBN error message.
  */
-typedef struct
+typedef struct __attribute__((packed))
 {
   dbn_hdr_t hdr;
   char msg[64];
@@ -184,12 +213,32 @@ typedef struct
 /**
  * @brief DBN system message.
  */
-typedef struct
+typedef struct __attribute__((packed))
 {
   dbn_hdr_t hdr;
   char msg[64];
   uint64_t ts_out; // Only valid if ts_out enabled during authentication
 } dbn_smsg_t;
+
+
+/*
+ * Macros supporting DBN_MAX_MESSAGE_SIZE computation.
+ */
+#define MAX2(a, b)    ((a) > (b) ? (a) : (b))
+#define MAX3(a, b, c) ((a) > (b) ? ((a) > (c) ? (a) : (c)) : ((b) > (c) ? (b) : (c)))
+#define MAX6(a, b, c, d, e, f) MAX2(MAX3(a, b, c), MAX3(d, e, f))
+
+
+/**
+ * @brief Maximum size of a supported DBN message, compile-time constant.
+ */
+#define DBN_MAX_MESSAGE_SIZE MAX6( \
+  sizeof(dbn_smap_t), \
+  sizeof(dbn_sdef_t), \
+  sizeof(dbn_cmbp1_t), \
+  sizeof(dbn_bbo_t), \
+  sizeof(dbn_emsg_t), \
+  sizeof(dbn_smsg_t))
 
 
 /*
@@ -205,91 +254,22 @@ typedef struct dbn dbn_t;
  * @param dbn Pointer to client object.
  * @param fatal Indicates if the error is fatal, and further comms are unlikely to succeed.
  * @param msg Pointer to null-terminated error message.
- * @param arg Arbitrary caller-provided pointer provided to the function invoking this handler.
  */
-typedef void (*dbn_error_handler_t)(
+typedef void (*dbn_on_error_t)(
   dbn_t *dbn,
   bool fatal,
-  char *msg,
-  void *arg);
+  char *msg);
 
 
 /**
- * @brief Signature for a symbol mapping message handler.
+ * @brief Signature for a Databento message handler.
  *
  * @param dbn Pointer to client object.
- * @param smap Pointer to message.
- * @param arg Arbitrary caller-provided pointer provided to the function invoking this handler.
+ * @param msg Pointer to message. Handler must not free, and must not rely on it after the handler returns.
  */
-typedef void (*dbn_smap_handler_t)(
+typedef void (*dbn_on_msg_t)(
   dbn_t *dbn,
-  dbn_smap_t *smap,
-  void *arg);
-
-
-/**
- * @brief Signature for a security definition message handler.
- *
- * @param dbn Pointer to client object.
- * @param sdef Pointer to message.
- * @param arg Arbitrary caller-provided pointer provided to the function invoking this handler.
- */
-typedef void (*dbn_sdef_handler_t)(
-  dbn_t *dbn,
-  dbn_sdef_t *sdef,
-  void *arg);
-
-
-/**
- * @brief Signature for a CMBP-1 message handler.
- *
- * @param dbn Pointer to client object.
- * @param cmbp1 Pointer to message.
- * @param arg Arbitrary caller-provided pointer provided to the function invoking this handler.
- */
-typedef void (*dbn_cmbp1_handler_t)(
-  dbn_t *dbn,
-  dbn_cmbp1_t *cmbp1,
-  void *arg);
-
-
-/**
- * @brief Signature for a BBO message handler.
- *
- * @param dbn Pointer to client object.
- * @param bbo Pointer to message.
- * @param arg Arbitrary caller-provided pointer provided to the function invoking this handler.
- */
-typedef void (*dbn_bbo_handler_t)(
-  dbn_t *dbn,
-  dbn_bbo_t *bbo,
-  void *arg);
-
-
-/**
- * @brief Signature for an error message handler.
- *
- * @param dbn Pointer to client object.
- * @param emsg Pointer to message.
- * @param arg Arbitrary caller-provided pointer provided to the function invoking this handler.
- */
-typedef void (*dbn_emsg_handler_t)(
-  dbn_t *dbn,
-  dbn_emsg_t *emsg,
-  void *arg);
-
-
-/**
- * @brief Signature for a system message handler.
- *
- * @param dbn Pointer to client object.
- * @param smsg Pointer to message.
- * @param arg Arbitrary caller-provided pointer provided to the function invoking this handler.
- */
-typedef void (*dbn_smsg_handler_t)(
-  dbn_t *dbn,
-  dbn_smsg_t *smsg,
-  void *arg);
+  dbn_hdr_t *msg);
 
 
 /**
@@ -297,20 +277,16 @@ typedef void (*dbn_smsg_handler_t)(
  */
 struct dbn
 {
-  int sock;                       ///< @brief Socket file descriptor
-  int capacity;                   ///< @brief Kernel receive buffer size, and size of local buffers, in bytes
-  struct io_uring ring;           ///< @brief io_uring used to communicate with the socket
-  uint8_t *buffer0;               ///< @brief First receive buffer, to be filled by the kernel while the client is handling data in the second buffer
-  uint8_t *buffer1;               ///< @brief Second receive buffer, to be filled by the kernel while the client is handling data in the first buffer
-  uint8_t *leftover;              ///< @brief Leftover data buffer, used to hold incomplete message data that spans multiple io_uring reads
-  int leftover_count;             ///< @brief Number of bytes in the leftover data buffer
-  dbn_error_handler_t on_error;   ///< @brief If not NULL, called on runtime client error
-  dbn_smap_handler_t on_smap;     ///< @brief If not NULL, called on receipt of a symbol mapping message
-  dbn_sdef_handler_t on_sdef;     ///< @brief If not null, called on receipt of a security definition message
-  dbn_cmbp1_handler_t on_cmbp1;   ///< @brief If not NULL, called on receipt of a cmbp-1 message
-  dbn_bbo_handler_t on_bbo;       ///< @brief If not NULL, called on receipt of a bbo-1s or bbo-1m message
-  dbn_emsg_handler_t on_emsg;     ///< @brief If not NULL, called on receipt of an error message
-  dbn_smsg_handler_t on_smsg;     ///< @brief If not NULL, called on receipt of a system message
+  int sock;                   ///< @brief Socket file descriptor
+  int capacity;               ///< @brief Kernel receive buffer size, and size of local buffers, in bytes
+  struct io_uring ring;       ///< @brief io_uring used to communicate with the socket
+  uint8_t *buffer0;           ///< @brief First receive buffer, to be filled by the kernel while the client is handling data in the second buffer
+  uint8_t *buffer1;           ///< @brief Second receive buffer, to be filled by the kernel while the client is handling data in the first buffer
+  uint8_t *leftover;          ///< @brief Leftover data buffer, used to hold incomplete message data that spans multiple io_uring reads
+  int leftover_count;         ///< @brief Number of bytes in the leftover data buffer
+  dbn_on_error_t on_error;    ///< @brief If not NULL, called on runtime client error
+  dbn_on_msg_t on_msg;        ///< @brief If not NULL, called on receipt of a Databento message
+  void *ctx;                  ///< @brief Optional, arbitrary owner-provided pointer
 };
 
 
@@ -318,9 +294,15 @@ struct dbn
  * @brief Initialize a Databento live data client, but don't connect yet.
  *
  * @param dbn Pointer to an uninitialized client object.
+ * @param on_error Pointer to client error handler. May be NULL.
+ * @param on_msg Pointer to client message handler. May be NULL.
+ * @param ctx Optional, arbitrary pointer to associate with the client.
  */
 extern void dbn_init(
-  dbn_t *dbn);
+  dbn_t *dbn,
+  dbn_on_error_t on_error,
+  dbn_on_msg_t on_msg,
+  void *ctx);
 
 
 /**
@@ -330,7 +312,6 @@ extern void dbn_init(
  * @param api_key Pointer to null-terminated Databento API key.
  * @param dataset Pointer to null-terminated Databento dataset name.
  * @param ts_out Indicates if Databento should perform ts_out timestamping.
- * @param arg Arbitrary pointer passed along to any handlers invoked by this function.
  *
  * @return 0 on success, or -1 on failure with errno set and error handler
  * invoked (if not NULL).
@@ -339,8 +320,7 @@ extern int dbn_connect(
   dbn_t *dbn,
   const char *api_key,
   const char *dataset,
-  bool ts_out,
-  void *arg);
+  bool ts_out);
 
 
 /**
@@ -353,7 +333,6 @@ extern int dbn_connect(
  * @param symbols Pointer to array of pointers to null-terminated symbols.
  * @param suffix Pointer to null-terminated suffix string to be applied to symbols.
  * @param replay If true, client will replay the current day's worth of data instead of subscribing to live data.
- * @param arg Arbitrary pointer passed along to any handlers invoked by this function.
  *
  * @return 0 on success, or -1 on failure with errno set and error handler invoked (if not NULL).
  */
@@ -364,19 +343,17 @@ extern int dbn_start(
   int num_symbols,
   const char * const *symbols,
   const char *suffix,
-  bool replay,
-  void *arg);
+  bool replay);
 
 
 /**
  * @brief Receive data from Databento. Blocks until at least one message is received.
  *
  * @param dbn Pointer to an initialized and started client object.
- * @param arg Arbitrary pointer passed along to any handlers invoked by this function.
  *
  * @return Number of messages received by this call.
  */
-extern int dbn_get(dbn_t *dbn, void *arg);
+extern int dbn_get(dbn_t *dbn);
 
 
 /**

@@ -102,14 +102,12 @@ static char *get_control_message_field(char *msg, char *key)
  *
  * @param dbn Pointer to client object.
  * @param fatal Indicates if the error being reported is fatal or not.
- * @param arg Arbitrary caller-provided pointer passed along to error handler.
  * @param format printf-style format string.
  * @param  ... Arguments for format string.
  */
 static void invoke_error_handler(
   dbn_t *dbn,
   bool fatal,
-  void *arg,
   const char *format,
   ...)
 {
@@ -129,17 +127,22 @@ static void invoke_error_handler(
   dbn->on_error(
     dbn,
     fatal,
-    msg,
-    arg);
+    msg);
 
   free(msg);
 }
 
 
 void dbn_init(
-  dbn_t *dbn)
+  dbn_t *dbn,
+  dbn_on_error_t on_error,
+  dbn_on_msg_t on_msg,
+  void *ctx)
 {
   memset(dbn, 0, sizeof(dbn_t));
+  dbn->on_error = on_error;
+  dbn->on_msg = on_msg;
+  dbn->ctx = ctx;
 }
 
 
@@ -147,8 +150,7 @@ int dbn_connect(
   dbn_t *dbn,
   const char *api_key,
   const char *dataset,
-  bool ts_out,
-  void *arg)
+  bool ts_out)
 {
   /*
    * Create socket.
@@ -159,7 +161,6 @@ int dbn_connect(
     invoke_error_handler(
       dbn,
       true,
-      arg,
       "Failed to create socket (errno %d: %s)",
       e,
       strerror(e));
@@ -183,7 +184,6 @@ int dbn_connect(
     invoke_error_handler(
       dbn,
       true,
-      arg,
       "Failed to set socket buffer size (errno %d: %s)",
       e,
       strerror(e));
@@ -209,7 +209,6 @@ int dbn_connect(
     invoke_error_handler(
       dbn,
       true,
-      arg,
       "Failed to set socket buffer size (size is %d)",
       buffer_size);
     errno = ENOMEM;
@@ -234,7 +233,6 @@ int dbn_connect(
     invoke_error_handler(
       dbn,
       true,
-      arg,
       "Failed to allocate buffer (errno %d: %s)",
       e,
       strerror(e));
@@ -285,7 +283,6 @@ int dbn_connect(
     invoke_error_handler(
       dbn,
       true,
-      arg,
       "Failed to resolve %s (%s)",
       fqdn,
       gai_strerror(r));
@@ -312,7 +309,6 @@ int dbn_connect(
     invoke_error_handler(
       dbn,
       true,
-      arg,
       "Failed to connect (errno %d: %s)",
       e,
       strerror(e));
@@ -331,7 +327,6 @@ int dbn_connect(
     invoke_error_handler(
       dbn,
       true,
-      arg,
       "Error receiving first control message");
     errno = EBADMSG;
     return -1;
@@ -344,7 +339,6 @@ int dbn_connect(
     invoke_error_handler(
       dbn,
       true,
-      arg,
       "First control message is missing lsg_version field");
     errno = EBADMSG;
     return -1;
@@ -363,7 +357,6 @@ int dbn_connect(
     invoke_error_handler(
       dbn,
       true,
-      arg,
       "Error receiving second control message");
     errno = EBADMSG;
     return -1;
@@ -377,7 +370,6 @@ int dbn_connect(
     invoke_error_handler(
       dbn,
       true,
-      arg,
       "Second control message is missing cram field");
     errno = EBADMSG;
     return -1;
@@ -393,7 +385,6 @@ int dbn_connect(
     invoke_error_handler(
       dbn,
       true,
-      arg,
       "Failed to initialize libsodium (errno %d: %s)",
       e,
       strerror(e));
@@ -457,7 +448,6 @@ int dbn_connect(
     invoke_error_handler(
       dbn,
       true,
-      arg,
       "Error receiving third control message");
     errno = EBADMSG;
     return -1;
@@ -471,7 +461,6 @@ int dbn_connect(
     invoke_error_handler(
       dbn,
       true,
-      arg,
       "Third control message is missing success field");
     errno = EBADMSG;
     return -1;
@@ -482,7 +471,6 @@ int dbn_connect(
     invoke_error_handler(
       dbn,
       true,
-      arg,
       "Databento authentication failed");
     free(success);
     errno = EACCES;
@@ -506,8 +494,7 @@ int dbn_start(
   int num_roots,
   const char * const *roots,
   const char *suffix,
-  bool replay,
-  void *arg)
+  bool replay)
 {
   /*
    * Subscribing to all symbols means subscribing only to the special
@@ -622,14 +609,22 @@ int dbn_start(
     }
     else if (m == 0)
     {
-      invoke_error_handler(dbn, true, arg, "Connection closed unexpectedly");
+      invoke_error_handler(
+        dbn,
+        true,
+        "Connection closed unexpectedly");
       errno = ECONNRESET;
       return -1;
     }
     else
     {
       int e = errno;
-      invoke_error_handler(dbn, true, arg, "Error reading from socket (errno %d: %s)", e, strerror(e));
+      invoke_error_handler(
+        dbn,
+        true,
+        "Error reading from socket (errno %d: %s)",
+        e,
+        strerror(e));
       errno = e;
       return -1;
     }
@@ -637,14 +632,21 @@ int dbn_start(
 
   if (strncmp((char *)preheader, "DBN", 3))
   {
-    invoke_error_handler(dbn, true, arg, "Stream header has invalid signature");
+    invoke_error_handler(
+      dbn,
+      true,
+      "Stream header has invalid signature");
     errno = EBADMSG;
     return -1;
   }
 
   if (preheader[3] != 1)
   {
-    invoke_error_handler(dbn, true, arg, "Stream header version %d unsupported", preheader[3]);
+    invoke_error_handler(
+      dbn,
+      true,
+      "Stream header version %d unsupported",
+      preheader[3]);
     errno = EBADMSG;
     return -1;
   }
@@ -659,14 +661,21 @@ int dbn_start(
   int header_head = 0;
   while (header_head < header_length)
   {
-    ssize_t m = recv(dbn->sock, header + header_head, header_length - header_head, 0);
+    ssize_t m = recv(
+      dbn->sock,
+      header + header_head,
+      header_length - header_head,
+      0);
     if (m > 0)
     {
       header_head += m;
     }
     else if (m == 0)
     {
-      invoke_error_handler(dbn, true, arg, "Connection closed unexpectedly");
+      invoke_error_handler(
+        dbn,
+        true,
+        "Connection closed unexpectedly");
       free(header);
       errno = ECONNRESET;
       return -1;
@@ -674,7 +683,12 @@ int dbn_start(
     else
     {
       int e = errno;
-      invoke_error_handler(dbn, true, arg, "Error reading from socket (errno %d: %s)", e, strerror(e));
+      invoke_error_handler(
+        dbn,
+        true,
+        "Error reading from socket (errno %d: %s)",
+        e,
+        strerror(e));
       free(header);
       errno = e;
       return -1;
@@ -702,7 +716,7 @@ int dbn_start(
 }
 
 
-int dbn_get(dbn_t *dbn, void *arg)
+int dbn_get(dbn_t *dbn)
 {
   /*
    * Wait for some data to arrive in one of our two io_uring buffers.
@@ -713,7 +727,12 @@ int dbn_get(dbn_t *dbn, void *arg)
   {
     if (m == -EINTR) return 0;
     int e = errno;
-    invoke_error_handler(dbn, true, arg, "Error waiting on io_uring (errno %d: %s)", e, strerror(e));
+    invoke_error_handler(
+      dbn,
+      true,
+      "Error waiting on io_uring (errno %d: %s)",
+      e,
+      strerror(e));
     errno = e;
     return -1;
   }
@@ -724,14 +743,22 @@ int dbn_get(dbn_t *dbn, void *arg)
 
   if (n == 0)
   {
-    invoke_error_handler(dbn, true, arg, "Connection closed unexpectedly");
+    invoke_error_handler(
+      dbn,
+      true,
+      "Connection closed unexpectedly");
     errno = ECONNRESET;
     return -1;
   }
   else if (n < 0)
   {
     int e = errno;
-    invoke_error_handler(dbn, true, arg, "Error reading from socket (errno %d: %s)", e, strerror(e));
+    invoke_error_handler(
+      dbn,
+      true,
+      "Error reading from socket (errno %d: %s)",
+      e,
+      strerror(e));
     errno = e;
     return -1;
   }
@@ -751,7 +778,10 @@ int dbn_get(dbn_t *dbn, void *arg)
   {
     if (dbn->leftover_count + n > dbn->capacity)
     {
-      invoke_error_handler(dbn, true, arg, "Leftover data would cause buffer overflow");
+      invoke_error_handler(
+        dbn,
+        true,
+        "Leftover data would cause buffer overflow");
       errno = ENOMEM;
       return -1;
     }
@@ -775,65 +805,19 @@ int dbn_get(dbn_t *dbn, void *arg)
     int rlength = 4 * ptr[0];
     if (rlength < 16)
     {
-      invoke_error_handler(dbn, true, arg, "Bad message length %d", rlength);
+      invoke_error_handler(
+        dbn,
+        true,
+        "Bad message length %d",
+        rlength);
       errno = EBADMSG;
       return -1;
     }
     if (n < rlength) break; // Not enough data for this message
 
-    uint8_t rtype = ptr[1];
-
-    if (rtype == 177) // CMBP-1 message
-    {
-      if (dbn->on_cmbp1) dbn->on_cmbp1(
-        dbn,
-        (dbn_cmbp1_t *)ptr,
-        arg);
-    }
-    else if (rtype == 192) // BBO message
-    {
-      if (dbn->on_bbo) dbn->on_bbo(
-        dbn,
-        (dbn_bbo_t *)ptr,
-        arg);
-    }
-    else if (rtype == 22) // Symbol mapping message
-    {
-      if (dbn->on_smap) dbn->on_smap(
-        dbn,
-        (dbn_smap_t *)ptr,
-        arg);
-    }
-    else if (rtype == 19) // Security definition message
-    {
-      if (dbn->on_sdef) dbn->on_sdef(
-        dbn,
-        (dbn_sdef_t *)ptr,
-        arg);
-     }
-    else if (rtype == 21) // Error message
-    {
-      if (dbn->on_emsg) dbn->on_emsg(
-        dbn,
-        (dbn_emsg_t *)ptr,
-        arg);
-    }
-    else if (rtype == 23) // System message
-    {
-      if (dbn->on_smsg) dbn->on_smsg(
-        dbn,
-        (dbn_smsg_t *)ptr,
-        arg);
-    }
-    else // Unsupported
-    {
-      invoke_error_handler(
-        dbn,
-        false,
-        arg,
-        "Unsupported Databento record type %d",
-        rtype);
-    }
+    if (dbn->on_msg) dbn->on_msg(
+      dbn,
+      (dbn_hdr_t *)ptr);
 
     ptr += rlength;
     n -= rlength;

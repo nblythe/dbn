@@ -34,20 +34,17 @@ $ cmake . -DCMAKE_BUILD_TYPE=Release
 -- Generating done
 -- Build files have been written to: /home/user/dbn
 $ make
-[ 16%] Building C object dbn/CMakeFiles/dbn.dir/dbn.c.o
+[ 16%] Building C object libdbn/CMakeFiles/libdbn.dir/dbn.c.o
 [ 33%] Linking C static library libdbn.a
 [ 33%] Built target dbn
-[ 50%] Building C object dbn_stats/CMakeFiles/dbn_stats.dir/dbn_stats.c.o
-[ 66%] Linking C executable dbn_stats
-[ 66%] Built target dbn_stats
-[ 83%] Building C object dbn_roots/CMakeFiles/dbn_roots.dir/dbn_roots.c.o
-[100%] Linking C executable dbn_roots
-[100%] Built target dbn_roots
+...
 $
 ```
 
 ## Build outputs
-This project includes three binaries:
-- `libdbn.a`: Databento real-time market data client, static library. See `dbn/dbn/README.md` for details.
-- `dbn_stats`: Susbcribes to command-line specified data and collects message counts and timing statistics. See `dbn/dbn_stats/README.md` for details.
-- `dbn_roots`: Collects and prints Databento-supported optionable equity root symbols (ex. `MSFT.OPT`, `SPY.OPT`, etc.). See `dbn/dbn_roots/README.md` for details.
+This project produces three outputs:
+- `libdbn.a`: Databento real-time market data client, static library. See `libdbn/README.md` for details.
+- `dbn_stats`: Susbcribes to command-line specified data and collects message counts and timing statistics. See `dbn_stats/README.md` for details.
+- `dbn_multi_stats`: Multi-threaded, multi-session version of `dbn_stats`. See `dbn_multi_stats/README.md` for details.
+- `dbn_roots`: Collects and prints Databento-supported optionable equity root symbols (ex. `MSFT.OPT`, `SPY.OPT`, etc.). See `dbn_roots/README.md` for details.
+- `dbn_opra_stress`: Subscribes to the entire OPRA.PILLAR CMBP-1 equity option dataset, a stress-test of host and network performance. See `dbn_opra_stress/README.md` for details.
