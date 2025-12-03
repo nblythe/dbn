@@ -42,9 +42,10 @@ $
 ```
 
 ## Build outputs
-This project produces three outputs:
-- `libdbn.a`: Databento real-time market data client, static library. See `libdbn/README.md` for details.
-- `dbn_stats`: Susbcribes to command-line specified data and collects message counts and timing statistics. See `dbn_stats/README.md` for details.
-- `dbn_multi_stats`: Multi-threaded, multi-session version of `dbn_stats`. See `dbn_multi_stats/README.md` for details.
-- `dbn_roots`: Collects and prints Databento-supported optionable equity root symbols (ex. `MSFT.OPT`, `SPY.OPT`, etc.). See `dbn_roots/README.md` for details.
-- `dbn_opra_stress`: Subscribes to the entire OPRA.PILLAR CMBP-1 equity option dataset, a stress-test of host and network performance. See `dbn_opra_stress/README.md` for details.
+This project produces five outputs:
+- `libdbn.a`: Databento real-time market data client, static library.
+- `libdbnopra.a`: Client wrappers for working with Databento's OPRA.PILLAR dataset.
+- `dbn_stats`: Susbcribes to command-line specified data and collects message counts and timing statistics.
+- `dbn_multi_stats`: Multi-threaded, multi-session version of `dbn_stats`.
+- `dbn_roots`: Collects and prints Databento-supported optionable equity root symbols (ex. `MSFT.OPT`, `SPY.OPT`, etc.).
+- `dbn_opra_stress`: Subscribes to the entire OPRA.PILLAR CMBP-1 equity option dataset, a stress-test of host and network performance.

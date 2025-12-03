@@ -1,4 +1,4 @@
-add_library(dbn STATIC dbn.c dbn_multi.c dbn_opra_discover.c osi.c)
+add_library(dbn STATIC dbn.c dbn_multi.c)
 
 
 # Use PkgConfig to find libsodium and liburing.
@@ -14,6 +14,6 @@ target_include_directories(dbn PRIVATE ${liburing_INCLUDE_DIRS})
 target_link_libraries(dbn PRIVATE ${liburing_LIBRARIES})
 
 
-# Users of this library can #include <dbn.h>
+# Users of this library can #include <dbn.h> and <dbn_multi.h>
 #
 target_include_directories(dbn PUBLIC .)
