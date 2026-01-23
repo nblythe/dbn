@@ -17,6 +17,7 @@
 #include <pthread.h>
 
 #include "dbn.h"
+#include "osi.h"
 
 
 /**

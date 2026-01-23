@@ -76,7 +76,7 @@ static void on_msg(dbn_t *dbn, dbn_hdr_t *msg)
     bool insertion_needed = true;
     if (discover->num_roots)
     {
-      size_t last_index = 0;
+      size_t last_index = -1;
       size_t index = discover->num_roots / 2;
       size_t step = discover->num_roots / 2;
       while(true)
