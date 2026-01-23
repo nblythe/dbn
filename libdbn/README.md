@@ -228,6 +228,7 @@ while (!dbn_multi_is_fully_subscribed(&dbn_multi))
 ```
 
 Finally, to close all connections, stop all threads, and free all memory within all client objects, call `dbn_multi_close_all()`. The `dbn_multi_t` client object is unitialized after this call.
+
 Each client's worker thread calls `dbn_get()` as quickly as possible once that client is subscribed. The assigned `on_msg` (and, if necessary, `on_error`) callbacks are called from the worker thread, without synchronization.
 
 
@@ -235,4 +236,5 @@ Each client's worker thread calls `dbn_get()` as quickly as possible once that c
 For maximum performance, adhere to the following guidelines:
 1. Set the kernel maximum TCP receive buffer size to at least 64 MiB. (ex. `sysctl -w net.core.rmem-max=67108864`)
 2. Do as little work in message handlers as possible. For `dbn_multi_t`, consider using the `on_msg` callback to enqueue tasks into lock-free queues from which separate worker threads can draw.
+
 The most data-intensive stream Databento offers is the OPRA.PILLAR dataset with CMBP-1 schema. This client has been clocked consuming over 4 million OPRA quotes per second in intra-day replay mode with a 3 Gbps circuit and 10 CPU-pinned, channel-sharded connections / threads. With 4 ms ping latency to opra-pillar.lsg.databento.com, this client has demonstrated < 10 ms message latency under a load of 2.5 million quotes per second during a live market session, measured by the difference between ntp-synced host time and Databento message `ts_out` time.
